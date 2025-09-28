@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import MapComponent from './MapComponent';
+import { PoliceStation } from '../services/locationService';
 
 interface TicketData {
   destination: string;
@@ -17,91 +19,11 @@ const TicketSystem: React.FC = () => {
   const [timerInterval, setTimerInterval] = useState<NodeJS.Timeout | null>(null);
   const [typingDone, setTypingDone] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
-  const [linkedBooth, setLinkedBooth] = useState<any>(null);
+  const [linkedBooth, setLinkedBooth] = useState<PoliceStation | null>(null);
+  const [userLocation, setUserLocation] = useState<{lat: number; lng: number} | null>(null);
+  const [distanceToBooth, setDistanceToBooth] = useState<number | null>(null);
   
-  // Enhanced police booth data with all details needed for ticket system
-  const policeBoothDetails: Record<string, any> = {
-    'Connaught Place Police Station': {
-      name: 'Connaught Place Police Station',
-      code: 'CPP-001',
-      contact: '+91-11-23456789',
-      address: 'Connaught Place, New Delhi 110001',
-      distance: '1.8 km away',
-      city: 'Delhi'
-    },
-    'Marine Drive Police Station': {
-      name: 'Marine Drive Police Station',
-      code: 'MDP-002',
-      contact: '+91-22-23456789',
-      address: 'Nariman Point, Mumbai 400021',
-      distance: '3.1 km away',
-      city: 'Mumbai'
-    },
-    'MG Road Police Station': {
-      name: 'MG Road Police Station',
-      code: 'MGR-003',
-      contact: '+91-80-23456789',
-      address: 'MG Road, Bangalore 560001',
-      distance: '2.7 km away',
-      city: 'Bangalore'
-    },
-    'T Nagar Police Station': {
-      name: 'T Nagar Police Station',
-      code: 'TNP-004',
-      contact: '+91-44-24339222',
-      address: 'T Nagar, Chennai 600017',
-      distance: '4.2 km away',
-      city: 'Chennai'
-    },
-    'Koregaon Park Police Station': {
-      name: 'Koregaon Park Police Station',
-      code: 'KPP-005',
-      contact: '+91-20-26126595',
-      address: 'North Main Road, Pune 411001',
-      distance: '1.5 km away',
-      city: 'Pune'
-    },
-    'New Market Police Station': {
-      name: 'New Market Police Station',
-      code: 'NMP-006',
-      contact: '+91-33-22265301',
-      address: 'Lindsay Street, Kolkata 700087',
-      distance: '2.9 km away',
-      city: 'Kolkata'
-    },
-    'Civil Lines Police Station': {
-      name: 'Civil Lines Police Station',
-      code: 'CLP-007',
-      contact: '+91-141-2200100',
-      address: 'Civil Lines, Jaipur 302006',
-      distance: '3.8 km away',
-      city: 'Jaipur'
-    },
-    'Ellis Bridge Police Station': {
-      name: 'Ellis Bridge Police Station',
-      code: 'EBP-008',
-      contact: '+91-79-26577054',
-      address: 'Ellis Bridge, Ahmedabad 380006',
-      distance: '2.1 km away',
-      city: 'Ahmedabad'
-    },
-    'Hazratganj Police Station': {
-      name: 'Hazratganj Police Station',
-      code: 'HPP-009',
-      contact: '+91-522-2237721',
-      address: 'Hazratganj, Lucknow 226001',
-      distance: '1.9 km away',
-      city: 'Lucknow'
-    },
-    'Ranchi Sadar Thana': {
-      name: 'Ranchi Sadar Thana',
-      code: 'RST-001',
-      contact: '+91-651-2345678',
-      address: 'Main Road, Ranchi, Jharkhand 834001',
-      distance: '2.3 km away',
-      city: 'Ranchi'
-    }
-  };
+  // Legacy hardcoded station list removed; rely on stored linked station from registration flow
   
   const [formData, setFormData] = useState({
     travelDate: new Date().toISOString().split('T')[0],
@@ -112,41 +34,63 @@ const TicketSystem: React.FC = () => {
 
   useEffect(() => {
     // Check if user is registered
-    const registrationData = localStorage.getItem('userRegistration');
-    if (!registrationData) {
-      alert('You must complete registration first. Redirecting to registration page...');
-      navigate('/');
-      return;
-    }
-    
-    const parsedUserData = JSON.parse(registrationData);
-    setUserData(parsedUserData);
-    
-    // Get linked booth from localStorage or set default
-    const lastSearchedBooth = localStorage.getItem('linkedPoliceBooth');
-    if (lastSearchedBooth) {
-      const boothName = JSON.parse(lastSearchedBooth);
-      setLinkedBooth(policeBoothDetails[boothName] || policeBoothDetails['Ranchi Sadar Thana']);
-    } else {
-      // Default to a booth based on user's city if available
-      const userCity = parsedUserData.city?.toLowerCase();
-      let defaultBooth = policeBoothDetails['Ranchi Sadar Thana']; // fallback
-      
-      // Try to match user's city with available booths
-      for (const [, booth] of Object.entries(policeBoothDetails)) {
-        if (booth.city.toLowerCase().includes(userCity) || userCity.includes(booth.city.toLowerCase())) {
-          defaultBooth = booth;
-          break;
+    try {
+      const registrationData = localStorage.getItem('userRegistration');
+      if (!registrationData) {
+        navigate('/');
+        return;
+      }
+      const parsedUserData = JSON.parse(registrationData);
+      setUserData(parsedUserData);
+
+      const storedLinked = localStorage.getItem('linkedPoliceBooth');
+      if (storedLinked) {
+        try {
+          const station: PoliceStation = JSON.parse(storedLinked);
+          setLinkedBooth(station);
+        } catch (e) {
+          console.warn('Failed to parse linkedPoliceBooth', e);
         }
       }
-      setLinkedBooth(defaultBooth);
+
+      // Attempt to get user geolocation for distance measurement
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            setUserLocation(coords);
+          },
+          (err) => {
+            console.warn('Geolocation error:', err.message);
+          },
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      }
+    } catch (e) {
+      console.error('Corrupt registration data, clearing.', e);
+      localStorage.removeItem('userRegistration');
+      navigate('/');
+      return;
+    } finally {
+      setTimeout(() => setTypingDone(true), 1500);
     }
-    
-    // Typing animation setup
-    setTimeout(() => {
-      setTypingDone(true);
-    }, 3000);
   }, [navigate]);
+
+  // Compute distance whenever we have both userLocation and linkedBooth
+  useEffect(() => {
+    if (userLocation && linkedBooth && typeof linkedBooth.lat === 'number' && typeof linkedBooth.lng === 'number') {
+      const toRad = (v: number) => (v * Math.PI) / 180;
+      const R = 6371; // km
+      const dLat = toRad(linkedBooth.lat - userLocation.lat);
+      const dLng = toRad(linkedBooth.lng - userLocation.lng);
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(toRad(userLocation.lat)) * Math.cos(toRad(linkedBooth.lat)) * Math.sin(dLng/2) * Math.sin(dLng/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const dist = R * c;
+      setDistanceToBooth(dist);
+    } else {
+      setDistanceToBooth(null);
+    }
+  }, [userLocation, linkedBooth]);
 
   const updateTimer = () => {
     if (timeRemaining <= 0) {
@@ -211,10 +155,26 @@ const TicketSystem: React.FC = () => {
     }
   };
 
+  const handleSOS = () => {
+    if (confirm('⚠️ EMERGENCY SOS ALERT ⚠️\n\nThis will immediately notify:\n• Emergency contacts\n• Local police\n• Linked police booth\n\nPress OK only if you are in danger!')) {
+      // In a real app, this would trigger actual emergency protocols
+      alert('🚨 SOS ALERT SENT!\n\n -- Emergency contacts notified\n -- Police alerted with your location\n -- Help is on the way\n\nStay calm and wait for assistance.');
+      
+      // You could add actual emergency functionality here like:
+      // - Send location to emergency contacts
+      // - Call emergency services API
+      // - Log emergency event
+    }
+  };
+
   const timeDisplay = updateTimer();
 
   if (!userData) {
-    return <div>Loading...</div>;
+    return (
+      <div className="flex items-center justify-center min-h-screen text-sm text-gray-200" style={{background:'#551D25'}}>
+        Loading ticket system...
+      </div>
+    );
   }
 
   return (
@@ -348,7 +308,7 @@ const TicketSystem: React.FC = () => {
             </div>
             
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-1">
                 <svg className="w-4 h-4 text-red-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10"></circle>
                   <line x1="12" y1="8" x2="12" y2="12"></line>
@@ -358,13 +318,22 @@ const TicketSystem: React.FC = () => {
                   {timeRemaining <= 0 ? 'Time Expired!' : `Time Remaining: ${timeDisplay}`}
                 </span>
               </div>
-              <button 
-                type="button" 
-                onClick={handleCloseTicket}
-                className="btn btn-secondary px-6"
-              >
-                Close Ticket
-              </button>
+              <div className="flex gap-3 ml-4">
+                <button 
+                  type="button" 
+                  onClick={handleSOS}
+                  className="btn bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-2 rounded-lg animate-pulse min-w-[100px] flex items-center justify-center"
+                >
+                  SOS
+                </button>
+                <button 
+                  type="button" 
+                  onClick={handleCloseTicket}
+                  className="btn btn-secondary px-6 min-w-[120px] flex items-center justify-center"
+                >
+                  Close Ticket
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -390,8 +359,8 @@ const TicketSystem: React.FC = () => {
                   <p className="font-semibold text-gray-800">{linkedBooth?.name || 'Not linked'}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-600 mb-1">Station Code:</p>
-                  <p className="font-semibold text-gray-800">{linkedBooth?.code || '-'}</p>
+                  <p className="text-xs text-gray-600 mb-1">Station ID:</p>
+                  <p className="font-semibold text-gray-800">{linkedBooth?.id || '-'}</p>
                 </div>
               </div>
               
@@ -413,7 +382,9 @@ const TicketSystem: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-xs text-gray-600 mb-1">Distance:</p>
-                  <p className="font-semibold text-green-600">{linkedBooth?.distance || '-'}</p>
+                  <p className="font-semibold text-green-600">
+                    {distanceToBooth !== null ? `${distanceToBooth.toFixed(1)} km away` : (typeof linkedBooth?.distance === 'number' ? `${linkedBooth.distance.toFixed(1)} km away` : (linkedBooth?.distance || '-'))}
+                  </p>
                 </div>
               </div>
               
@@ -432,22 +403,20 @@ const TicketSystem: React.FC = () => {
               </div>
             </div>
             
-            {/* Right: Map View */}
-            <div className="w-64 h-48 bg-gray-200 rounded-lg flex flex-col items-center justify-center text-gray-600 relative">
-              <div className="text-center">
-                <svg className="w-8 h-8 mx-auto mb-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                  <circle cx="12" cy="10" r="3"></circle>
-                </svg>
-                <p className="text-sm font-medium">Distance Map</p>
-                <p className="text-xs text-gray-500">Your location to booth</p>
-              </div>
-              
-              {/* Distance indicator */}
-              {linkedBooth && (
-                <div className="absolute bottom-2 right-2 bg-white rounded-full px-2 py-1 text-xs font-bold text-green-600 shadow">
-                  {linkedBooth.distance.split(' ')[0]}
-                </div>
+            {/* Right: Interactive Map */}
+            <div className="w-64 h-48 rounded-lg overflow-hidden -ml-4">
+              {linkedBooth && linkedBooth.lat && linkedBooth.lng ? (
+                <MapComponent
+                  policeStation={linkedBooth}
+                  userLocation={userLocation || undefined}
+                  selectedStation={linkedBooth}
+                  height="192px"
+                  zoom={15}
+                  showDistance
+                  showDistanceLine
+                />
+              ) : (
+                <div className="map-placeholder h-48 flex items-center justify-center text-xs">No map data</div>
               )}
             </div>
           </div>

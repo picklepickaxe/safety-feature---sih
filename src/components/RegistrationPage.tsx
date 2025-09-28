@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import MapComponent from './MapComponent';
+import { geocodeCity, findNearbyPoliceStations, getCurrentLocation, PoliceStation } from '../services/locationService';
 
 const RegistrationPage: React.FC = () => {
   const navigate = useNavigate();
@@ -15,108 +17,124 @@ const RegistrationPage: React.FC = () => {
   const [mapDisplay, setMapDisplay] = useState('Enter a city or area and press the search button to find a booth nearby.');
   const [isTicketSystemEnabled, setIsTicketSystemEnabled] = useState(false);
   const [nearestBooth, setNearestBooth] = useState('-');
+  const [selectedStation, setSelectedStation] = useState<PoliceStation | null>(null);
+  const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [policeBoothOptions, setPoliceBoothOptions] = useState<PoliceStation[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [selectedBooth, setSelectedBooth] = useState<PoliceStation | null>(null);
+  const [isFetchingLocation, setIsFetchingLocation] = useState(false);
+  const [isBoothLinked, setIsBoothLinked] = useState(false);
+  const [showRightWarning, setShowRightWarning] = useState(false);
 
-  const mockPoliceBooths: Record<string, { name: string, details: string }> = {
-    'ranchi': { 
-      name: 'Ranchi Sadar Thana', 
-      details: 'Ranchi Sadar Thana - Located at Main Road, Ranchi. Contact: +91-651-2345678' 
-    },
-    'delhi': { 
-      name: 'Connaught Place Police Station', 
-      details: 'Connaught Place Police Station - Located at CP, New Delhi. Contact: +91-11-23456789' 
-    },
-    'mumbai': { 
-      name: 'Marine Drive Police Station', 
-      details: 'Marine Drive Police Station - Located at Nariman Point, Mumbai. Contact: +91-22-23456789' 
-    },
-    'bangalore': { 
-      name: 'MG Road Police Station', 
-      details: 'MG Road Police Station - Located at MG Road, Bangalore. Contact: +91-80-23456789' 
-    },
-    'hyderabad': { 
-      name: 'Banjara Hills Police Station', 
-      details: 'Banjara Hills Police Station - Located at Road No 12, Hyderabad. Contact: +91-40-23456789' 
-    },
-    'pune': { 
-      name: 'Koregaon Park Police Station', 
-      details: 'Koregaon Park Police Station - Located at North Main Road, Pune. Contact: +91-20-26126595' 
-    },
-    'chennai': { 
-      name: 'T Nagar Police Station', 
-      details: 'T Nagar Police Station - Located at T Nagar, Chennai. Contact: +91-44-24339222' 
-    },
-    'kolkata': { 
-      name: 'New Market Police Station', 
-      details: 'New Market Police Station - Located at Lindsay Street, Kolkata. Contact: +91-33-22265301' 
-    },
-    'jaipur': { 
-      name: 'Civil Lines Police Station', 
-      details: 'Civil Lines Police Station - Located at Civil Lines, Jaipur. Contact: +91-141-2200100' 
-    },
-    'ahmedabad': { 
-      name: 'Ellis Bridge Police Station', 
-      details: 'Ellis Bridge Police Station - Located at Ellis Bridge, Ahmedabad. Contact: +91-79-26577054' 
-    },
-    'lucknow': { 
-      name: 'Hazratganj Police Station', 
-      details: 'Hazratganj Police Station - Located at Hazratganj, Lucknow. Contact: +91-522-2237721' 
-    },
-    'kanpur': { 
-      name: 'Civil Lines Police Station', 
-      details: 'Civil Lines Police Station - Located at Civil Lines, Kanpur. Contact: +91-512-2367234' 
-    },
-    'patna': { 
-      name: 'Kotwali Police Station', 
-      details: 'Kotwali Police Station - Located at Fraser Road, Patna. Contact: +91-612-2222509' 
-    },
-    'bhopal': { 
-      name: 'MP Nagar Police Station', 
-      details: 'MP Nagar Police Station - Located at Zone 1, MP Nagar, Bhopal. Contact: +91-755-2576666' 
-    },
-    'guwahati': { 
-      name: 'Pan Bazaar Police Station', 
-      details: 'Pan Bazaar Police Station - Located at Pan Bazaar, Guwahati. Contact: +91-361-2516444' 
-    }
-  };
+
 
   useEffect(() => {
     const existingRegistration = localStorage.getItem('userRegistration');
     if (existingRegistration) {
       setIsTicketSystemEnabled(true);
     }
-  }, []);
 
-  const searchPoliceBooth = (city: string) => {
-    const cityLower = city.toLowerCase().trim();
-    console.log('Searching for city:', cityLower); // Debug log
-    let result = mockPoliceBooths[cityLower];
-    
-    if (!result) {
-      for (let key in mockPoliceBooths) {
-        if (cityLower.includes(key) || key.includes(cityLower)) {
-          result = mockPoliceBooths[key];
-          break;
-        }
+    const storedLinked = localStorage.getItem('linkedPoliceBooth');
+    if (storedLinked) {
+      try {
+        const booth: PoliceStation = JSON.parse(storedLinked);
+        setIsBoothLinked(true);
+        setSelectedBooth(booth);
+        setSelectedStation(booth);
+        setNearestBooth(booth.name);
+      } catch (e) {
+        console.warn('Failed to parse stored linked booth', e);
       }
     }
     
-    if (result) {
-      setMapDisplay(result.details);
-      setNearestBooth(result.name);
-      console.log('Found booth:', result.name); // Debug log
-    } else {
-      setMapDisplay(`No police booth found for "${city}". Please try: Delhi, Mumbai, Bangalore, Chennai, Kolkata, etc.`);
-      setNearestBooth('No booth found');
-      console.log('No booth found for:', city); // Debug log
+    // Optionally request user location for better search results
+    if (navigator.geolocation) {
+      console.log('Geolocation available, you can enable location access for better results');
+    }
+  }, []);
+
+  const fetchCurrentLocation = async () => {
+    setIsFetchingLocation(true);
+    setShowRightWarning(true);
+    try {
+      const location = await getCurrentLocation();
+      console.log('Current location found:', location);
+      
+      // Update city input with detected address
+      if (location.address) {
+        setFormData({...formData, city: location.city || location.address.split(',')[0] || 'Current Location'});
+      }
+      
+      const stations = await findNearbyPoliceStations(location.lat, location.lng);
+      console.log('Nearby police stations:', stations);
+      
+      if (stations.length > 0) {
+        setPoliceBoothOptions(stations);
+        setUserLocation({ lat: location.lat, lng: location.lng });
+        setMapDisplay(`Found ${stations.length} police stations near your location. Please select one from the dropdown.`);
+        
+        // Auto-select the nearest station
+        const nearestStation = stations[0];
+        setSelectedStation(nearestStation);
+        setSelectedBooth(nearestStation);
+        setNearestBooth(nearestStation.name);
+      } else {
+        setMapDisplay('No police stations found near your current location.');
+        setPoliceBoothOptions([]);
+      }
+    } catch (error) {
+      console.error('Location fetch error:', error);
+      setMapDisplay('Unable to fetch your location. Please ensure location access is enabled and try again.');
+      setPoliceBoothOptions([]);
+    } finally {
+      setIsFetchingLocation(false);
     }
   };
 
-  const handleSearch = () => {
-    if (formData.city) {
-      setMapDisplay('Searching for booths...');
-      setTimeout(() => {
-        searchPoliceBooth(formData.city);
-      }, 1000);
+  const searchPoliceBooth = async (city: string) => {
+    setIsLoading(true);
+    try {
+      console.log('Searching for city:', city);
+      
+      // First, geocode the city to get coordinates
+      const location = await geocodeCity(city);
+      console.log('Location found:', location);
+      
+      // Then find nearby police stations
+      const stations = await findNearbyPoliceStations(location.lat, location.lng);
+      console.log('Police stations found:', stations);
+      
+      if (stations.length > 0) {
+        setPoliceBoothOptions(stations);
+        setUserLocation({ lat: location.lat, lng: location.lng });
+        setMapDisplay(`Found ${stations.length} police stations near ${location.city || city}. Please select one from the dropdown below.`);
+        
+        // Auto-select the nearest station
+        const nearestStation = stations[0];
+        setSelectedStation(nearestStation);
+        setSelectedBooth(nearestStation);
+        setNearestBooth(nearestStation.name);
+      } else {
+        setMapDisplay(`No police stations found near ${city}. This might be a remote area or the location service is unavailable.`);
+        setNearestBooth('No booth found');
+        setSelectedStation(null);
+        setPoliceBoothOptions([]);
+      }
+    } catch (error) {
+      console.error('Search error:', error);
+      setMapDisplay(`Could not find location "${city}". Please check spelling or try a different city/area name.`);
+      setNearestBooth('Search failed');
+      setSelectedStation(null);
+      setPoliceBoothOptions([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSearch = async () => {
+    if (formData.city.trim()) {
+      setMapDisplay('Searching for police stations...');
+      await searchPoliceBooth(formData.city.trim());
     } else {
       setMapDisplay('Please enter a city or area to search.');
     }
@@ -130,12 +148,30 @@ const RegistrationPage: React.FC = () => {
   };
 
   const handleLinkBooth = () => {
-    if (nearestBooth === 'No booth found' || nearestBooth === '-') {
-      setMapDisplay('Please search for a valid city first to link to a police booth.');
+    if (isBoothLinked) {
+      // Unlink the booth
+      setIsBoothLinked(false);
+      setMapDisplay('You have been unlinked from the police booth.');
+      localStorage.removeItem('linkedPoliceBooth');
     } else {
-      setMapDisplay(`You are now linked to ${nearestBooth}. Your daily check-ins will be logged automatically.`);
-      // Save linked booth to localStorage for ticket system
-      localStorage.setItem('linkedPoliceBooth', JSON.stringify(nearestBooth));
+      // Link to the booth
+      if (!selectedBooth || nearestBooth === 'No booth found' || nearestBooth === '-') {
+        setMapDisplay('Please search and select a valid police station first to link to a police booth.');
+      } else {
+        setIsBoothLinked(true);
+        setMapDisplay(`You are now linked to ${selectedBooth.name}. Your daily check-ins will be logged automatically.`);
+        // Save complete linked booth data to localStorage for ticket system
+        localStorage.setItem('linkedPoliceBooth', JSON.stringify(selectedBooth));
+      }
+    }
+  };
+
+  const handlePoliceStationSelect = (stationId: string) => {
+    const station = policeBoothOptions.find(s => s.id === stationId);
+    if (station) {
+      setSelectedBooth(station);
+      setSelectedStation(station);
+      setNearestBooth(station.name);
     }
   };
 
@@ -243,45 +279,123 @@ const RegistrationPage: React.FC = () => {
             <div className="flex items-center gap-2 mb-2">
               <button type="button" className="upload-btn text-white font-medium text-xs px-2 py-1 rounded-md flex items-center gap-1">
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M5 9V7a5 5 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                  <path fillRule="evenodd" d="M5 9V7a5 5 0 0 1 10 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                 </svg>
                 Upload ID Proof
               </button>
               <div className="flex-grow relative">
                 <input 
                   type="text" 
-                  className="input-field w-full pr-7" 
+                  className="input-field w-full pr-14" 
                   placeholder="Enter your city or area" 
                   value={formData.city}
                   onChange={(e) => setFormData({...formData, city: e.target.value})}
                   onKeyPress={handleKeyPress}
                 />
-                <button 
-                  type="button" 
-                  onClick={handleSearch}
-                  className="absolute right-1 top-1/2 transform -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full bg-white bg-opacity-70 text-gray-700"
-                >
-                  <svg className="w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M15.5 14h-.79l-.28-.27A6.5 6.5 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.11 0 2.15-.31 3-1.42l.27.28v.79l5 4.99L20.49 19l-4.99-5zM9.5 14C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-                  </svg>
-                </button>
+                <div className="absolute right-1 top-1/2 transform -translate-y-1/2 flex gap-1">
+                  <button 
+                    type="button" 
+                    onClick={fetchCurrentLocation}
+                    disabled={isFetchingLocation}
+                    className="w-5 h-5 flex items-center justify-center rounded-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white transition-colors"
+                    title="Fetch My Location"
+                  >
+                    {isFetchingLocation ? (
+                      <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"></circle>
+                        <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" className="opacity-75"></path>
+                      </svg>
+                    ) : (
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                      </svg>
+                    )}
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={handleSearch}
+                    className="w-5 h-5 flex items-center justify-center rounded-full bg-white bg-opacity-70 text-gray-700"
+                    title="Search"
+                  >
+                    <svg className="w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M15.5 14h-.79l-.28-.27A6.5 6.5 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.11 0 2.15-.31 3-1.42l.27.28v.79l5 4.99L20.49 19l-4.99-5zM9.5 14C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="map-placeholder border border-gray-400 rounded-lg">
-              <p className={mapDisplay.includes('Ranchi Sadar Thana') ? 'text-white text-base' : (mapDisplay.includes('No police booth') ? 'text-red-400' : 'text-gray-500')}>
-                {mapDisplay}
-              </p>
+            {/* Police Station Dropdown with Warning - directly under city input */}
+            {policeBoothOptions.length > 0 && (
+              <div className="flex items-stretch gap-2 mb-2">
+                {/* Warning on the left - match dropdown height */}
+                <div className="flex-shrink-0 bg-yellow-50 border-l-2 border-yellow-400 rounded text-xs flex items-center px-2" style={{minHeight: '2rem'}}>
+                  <div className="flex items-center gap-1">
+                    <svg className="w-3 h-3 text-yellow-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <span className="text-yellow-800 leading-tight whitespace-nowrap">
+                      Verify jurisdiction with authorities
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Dropdown taking remaining space */}
+                <div className="flex-grow">
+                  <select 
+                    value={selectedBooth?.id || ''} 
+                    onChange={(e) => handlePoliceStationSelect(e.target.value)}
+                    className="input-field w-full text-sm"
+                    style={{
+                      backgroundColor: '#4a5568',
+                      color: '#e2e8f0',
+                      border: '1px solid #4a5568'
+                    }}
+                  >
+                    <option value="" style={{ backgroundColor: '#4a5568', color: '#e2e8f0' }}>
+                      Select Police Station ({policeBoothOptions.length} found)
+                    </option>
+                    {policeBoothOptions.map((station) => (
+                      <option key={station.id} value={station.id} style={{ backgroundColor: '#4a5568', color: '#e2e8f0' }}>
+                        {station.name} {station.distance && `(${station.distance.toFixed(1)} km away)`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* Map Display - in existing gray area */}
+            <div className="border border-gray-400 rounded-lg overflow-hidden">
+              {selectedBooth && userLocation ? (
+                <div className="h-48">
+                  <MapComponent 
+                    policeStations={policeBoothOptions} 
+                    userLocation={userLocation}
+                    selectedStation={selectedBooth}
+                    height="192px"
+                    zoom={15}
+                  />
+                </div>
+              ) : (
+                <div className="map-placeholder">
+                  <p className={mapDisplay.includes('Ranchi Sadar Thana') ? 'text-white text-base' : (mapDisplay.includes('No police booth') ? 'text-red-400' : 'text-gray-500')}>
+                    {mapDisplay}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-between items-center mt-1 mb-1">
-              <p className="text-xs text-gray-600">Nearest Booth: {nearestBooth}</p>
+              <p className="text-xs text-gray-600">{isBoothLinked ? 'Linked Booth' : 'Nearest Booth'}: {nearestBooth}</p>
               <button 
                 type="button" 
                 onClick={handleLinkBooth}
-                className="text-xs font-semibold text-white px-2 py-0.5 rounded btn-primary"
+                className={`text-xs font-semibold text-white px-2 py-0.5 rounded ${
+                  isBoothLinked ? 'bg-red-600 hover:bg-red-700' : 'btn-primary'
+                }`}
               >
-                Link to this Police Booth
+                {isBoothLinked ? 'Unlink this Booth' : 'Link to this Police Booth'}
               </button>
             </div>
 
@@ -332,13 +446,32 @@ const RegistrationPage: React.FC = () => {
           </div>
           
           <div className="map-image-container">
-            <img src="https://placehold.co/300x200/F06292/fff?text=Map+image+placeholder" alt="Map image placeholder" className="w-full h-auto object-cover" />
+            <MapComponent
+              policeStation={selectedStation}
+              userLocation={userLocation || undefined}
+              height="200px"
+              zoom={selectedStation ? 15 : 12}
+              showDistance={!!(selectedStation && userLocation)}
+            />
             <div className="absolute bottom-3 right-3 flex items-center justify-center p-1.5 rounded-full bg-white bg-opacity-70 text-gray-700">
               <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
               </svg>
             </div>
           </div>
+          {/* Jurisdiction Warning (Right Column) */}
+          {showRightWarning && (
+          <div className="mt-3 w-full bg-yellow-50 border-l-4 border-yellow-500 rounded-md px-3 py-2 shadow-sm">
+            <div className="flex items-start gap-2">
+              <svg className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <p className="text-xs text-yellow-800 leading-snug">
+                Please confirm with local authorities which police station holds jurisdiction for your accommodation/location before finalizing registration.
+              </p>
+            </div>
+          </div>
+          )}
         </div>
       </div>
 
