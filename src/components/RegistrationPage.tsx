@@ -38,12 +38,19 @@ const RegistrationPage: React.FC = () => {
     if (storedLinked) {
       try {
         const booth: PoliceStation = JSON.parse(storedLinked);
-        setIsBoothLinked(true);
-        setSelectedBooth(booth);
-        setSelectedStation(booth);
-        setNearestBooth(booth.name);
+        const validLatLng = typeof booth?.lat === 'number' && typeof booth?.lng === 'number' && !isNaN(booth.lat) && !isNaN(booth.lng);
+        if (validLatLng) {
+          setIsBoothLinked(true);
+          setSelectedBooth(booth);
+          setSelectedStation(booth);
+          setNearestBooth(booth.name || '-');
+        } else {
+          console.warn('Invalid stored booth coordinates, clearing. Booth:', booth);
+          localStorage.removeItem('linkedPoliceBooth');
+        }
       } catch (e) {
         console.warn('Failed to parse stored linked booth', e);
+        localStorage.removeItem('linkedPoliceBooth');
       }
     }
     

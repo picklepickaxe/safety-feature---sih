@@ -57,16 +57,27 @@ const MapComponent: React.FC<MapComponentProps> = ({
   const defaultCenter: [number, number] = [28.6139, 77.2090];
   
   // Determine which stations to display
-  const stationsToShow = policeStations.length > 0 ? policeStations : (policeStation ? [policeStation] : []);
+  const isValidCoord = (v: any) => typeof v === 'number' && !isNaN(v);
+  const stationsToShow = (policeStations.length > 0 ? policeStations : (policeStation ? [policeStation] : []))
+    .filter(st => isValidCoord(st?.lat) && isValidCoord(st?.lng));
   
   // Determine map center
-  const mapCenter: [number, number] = selectedStation 
-    ? [selectedStation.lat, selectedStation.lng]
-    : policeStation 
-    ? [policeStation.lat, policeStation.lng]
-    : userLocation 
-    ? [userLocation.lat, userLocation.lng]
-    : defaultCenter;
+  const mapCenter: [number, number] = (() => {
+    if (selectedStation && isValidCoord(selectedStation.lat) && isValidCoord(selectedStation.lng)) {
+      return [selectedStation.lat, selectedStation.lng];
+    }
+    if (policeStation && isValidCoord(policeStation.lat) && isValidCoord(policeStation.lng)) {
+      return [policeStation.lat, policeStation.lng];
+    }
+    if (userLocation && isValidCoord(userLocation.lat) && isValidCoord(userLocation.lng)) {
+      return [userLocation.lat, userLocation.lng];
+    }
+    // Fallback to first valid station if exists
+    if (stationsToShow.length > 0) {
+      return [stationsToShow[0].lat, stationsToShow[0].lng];
+    }
+    return defaultCenter;
+  })();
 
   return (
     <div style={{ height, width: '100%', borderRadius: '8px', overflow: 'hidden' }}>
@@ -84,6 +95,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
         {/* Police Station Markers */}
         {stationsToShow.map((station) => {
           const isSelected = selectedStation?.id === station.id;
+          if (!isValidCoord(station.lat) || !isValidCoord(station.lng)) return null;
           const markerIcon = isSelected ? new L.Icon({
             iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
             shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
@@ -109,7 +121,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
         })}
         
         {/* User Location Marker */}
-        {userLocation && (
+  {userLocation && isValidCoord(userLocation.lat) && isValidCoord(userLocation.lng) && (
           <>
             <Marker position={[userLocation.lat, userLocation.lng]} icon={userIcon}>
               <Popup>
@@ -121,7 +133,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
             </Marker>
             
             {/* Distance Circle (if showing distance) */}
-            {showDistance && selectedStation && selectedStation.distance && (
+            {showDistance && selectedStation && selectedStation.distance && isValidCoord(selectedStation.lat) && isValidCoord(selectedStation.lng) && (
               <Circle
                 center={[userLocation.lat, userLocation.lng]}
                 radius={selectedStation.distance * 1000} // Convert km to meters
@@ -136,7 +148,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
             )}
 
             {/* Straight line distance and midpoint label */}
-            {showDistanceLine && selectedStation && (
+            {showDistanceLine && selectedStation && isValidCoord(selectedStation.lat) && isValidCoord(selectedStation.lng) && (
               <>
                 <Polyline
                   positions={[
